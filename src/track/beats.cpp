@@ -635,13 +635,35 @@ std::optional<BeatsPointer> Beats::tryTranslate(audio::FrameDiff_t offsetFrames)
 }
 
 std::optional<BeatsPointer> Beats::tryTranslateBeats(double xBeats) const {
-    if (!hasConstantTempo()) {
-        return std::nullopt;
+    // Binary operation returning the translation of m1 xBeats beats towards m2
+    // as a new BeatMarker.
+    auto markerTranslate =
+            [xBeats](const BeatMarker& m1, const BeatMarker& m2) -> BeatMarker {
+        const audio::FrameDiff_t offsetFrames =
+                (m2.position() - m1.position()) * xBeats / m1.beatsTillNextMarker();
+        const auto translatedPosition = m1.position() + offsetFrames;
+        return BeatMarker(translatedPosition.toLowerFrameBoundary(),
+                m1.beatsTillNextMarker());
+    };
+    std::vector<BeatMarker> markers;
+
+    if (m_markers.size() >= 2) {
+        std::transform(m_markers.cbegin(),
+                m_markers.cend() - 1,
+                m_markers.cbegin() + 1,
+                std::back_inserter(markers),
+                markerTranslate);
     }
+
+    if (m_markers.size() >= 1) {
+        const BeatMarker lastMarker = BeatMarker(m_lastMarkerPosition, 1);
+        markers.push_back(markerTranslate(m_markers.back(), lastMarker));
+    }
+
     const mixxx::audio::FrameDiff_t lastOffsetFrames =
             xBeats * m_sampleRate.value() * 60.0 / m_lastMarkerBpm.value();
     const auto lastMarkerPosition = m_lastMarkerPosition + lastOffsetFrames;
-    return BeatsPointer(new Beats(m_markers,
+    return BeatsPointer(new Beats(markers,
             lastMarkerPosition.toLowerFrameBoundary(),
             m_lastMarkerBpm,
             m_sampleRate,
